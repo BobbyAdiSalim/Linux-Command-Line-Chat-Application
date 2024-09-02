@@ -11,6 +11,7 @@
 
 #define MAX_NAME_LEN 15
 #define MAX_MSG_LEN 127
+#define BUF_LEN MAX_NAME_LEN + MAX_MSG_LEN + 3
 
 volatile sig_atomic_t stop = 0;
 
@@ -22,10 +23,6 @@ void clear_previous_line() {
 
 void handle_term(int signum) {
     stop = 1;
-    if (signum == SIGPIPE) {
-        char msg[] = "Server unexpectedly disconnected";
-        write(STDERR_FILENO, msg, strlen(msg));
-    }
 }
 
 void setup_signal_handlers() {
@@ -35,12 +32,12 @@ void setup_signal_handlers() {
     struct sigaction sa;
     sa.sa_handler = handle_term;
     sa.sa_flags = 0;
-    sigemptyset(&sa.sa_mask);
+    sigfillset(&sa.sa_mask);
 
     for (size_t i = 0; i < num_signals; i++) {
         if (sigaction(signals[i], &sa, NULL) != 0) {
             perror("sigaction");
-            exit(EXIT_FAILURE);
+            exit(1);
         }
     }
 }
@@ -64,7 +61,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    char msgbuf[MAX_MSG_LEN + 1];
+    char msgbuf[BUF_LEN];
 
     printf("Ready\n");
     // char name[31];
@@ -79,19 +76,21 @@ int main(int argc, char *argv[]) {
     // child: message reader
     if (pid == 0) {
         FILE *reader = fdopen(sfd, "r");
-        while (1) {
-            if (fgets(msgbuf, MAX_MSG_LEN + 1, reader) == NULL) {
-                fclose(reader);
-                exit(1);
-            }
+        while (fgets(msgbuf, BUF_LEN, reader) != NULL) {
             // TODO: handle case if message longer than 128?
             printf("%s", msgbuf);
         }
+        if (feof(reader))
+            printf("Server disconnected\n");
+        if (ferror(reader))
+            fprintf(stderr, "Read socket error\n");
+        fclose(reader);
+        exit(1);
     }
 
     // parent: message writer
-    while (!stop) {
-        fgets(msgbuf, MAX_MSG_LEN + 1, stdin);
+    setup_signal_handlers();
+    while (!stop && fgets(msgbuf, BUF_LEN, stdin) != NULL) {
         clear_previous_line();
         write(sfd, msgbuf, strlen(msgbuf));
     }

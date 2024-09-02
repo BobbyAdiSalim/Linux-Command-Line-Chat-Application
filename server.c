@@ -146,7 +146,6 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         int num_evs = epoll_wait(efd, ready_evs, MAX_EVENTS, -1);
-        printf("%d\n", num_evs);
         for (int i = 0; i < num_evs; i++) {
             client *cl_info = (client *) ready_evs[i].data.ptr;
             if (cl_info->fd == lfd) {
@@ -155,17 +154,13 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            printf("here\n");
             if (fgets(msgbuf, MAX_MSG_LEN + 1, cl_info->f) == NULL || 
                     msgbuf[strlen(msgbuf) - 1] != '\n') {
-                printf("here1\n");
                 head = disconnect_client(head, efd, cl_info);
-                printf("here2\n");
                 continue;
             }
 
             sprintf(sendbuf, "%s: %s", cl_info->name, msgbuf);
-            printf("here3\n");
             for (client_node *node = head; node != NULL; node = node->next) {
                 send(node->cl->fd, sendbuf, strlen(sendbuf), MSG_DONTWAIT);
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
