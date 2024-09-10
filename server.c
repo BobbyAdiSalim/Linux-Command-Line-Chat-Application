@@ -75,7 +75,6 @@ client_node *connect_client(client_node *head, int efd, int cfd) {
     cl->fd = cfd;
     cl->f = fdopen(cfd, "r");
     memset(cl->name, 0, MAX_NAME_LEN + 1);
-    cl->name[0] = name++;
     ev.events = EPOLLIN;
     ev.data.ptr = (void *) cl;
     epoll_ctl(efd, EPOLL_CTL_ADD, cfd, &ev);
@@ -152,6 +151,17 @@ int main(int argc, char *argv[]) {
                 int cfd = accept(lfd, NULL, NULL);
                 head = connect_client(head, efd, cfd);
                 continue;
+            }
+
+            if (strlen(cl_info->name) == 0) {
+                if (fgets(msgbuf, MAX_NAME_LEN + 1, cl_info->f) == NULL || 
+                        msgbuf[strlen(msgbuf) - 1] != '\n') {
+                    head = disconnect_client(head, efd, cl_info);
+                    continue;
+                }
+
+                msgbuf[strlen(msgbuf) - 1] = '\0';
+                strcpy(cl_info->name, msgbuf);
             }
 
             if (fgets(msgbuf, MAX_MSG_LEN + 1, cl_info->f) == NULL || 
