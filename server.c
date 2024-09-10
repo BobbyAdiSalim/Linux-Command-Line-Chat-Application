@@ -10,25 +10,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
-
-#define MAX_NAME_LEN 15
-#define MAX_MSG_LEN 127
-#define MAX_EVENTS 16
-#define MAX_CLIENTS 16
+#include "server.h"
 
 int num_cls = 0;
 char name = 'a';
-
-typedef struct client {
-    int fd;
-    FILE *f;
-    char name[MAX_NAME_LEN + 1];
-} client;
-
-typedef struct client_node {
-    client *cl;
-    struct client_node *next;
-} client_node;
 
 client_node *add_client(client_node *head, client *cl) {
     client_node *new_cl_node = malloc(sizeof(client_node));
@@ -41,6 +26,7 @@ client_node *remove_client(client_node *head, int fd) {
     if (head == NULL)
         return head;
     if (head->cl->fd == fd) {
+        fclose(head->cl->f);
         free(head->cl);
         client_node *new_head = head->next;
         free(head);
@@ -50,7 +36,7 @@ client_node *remove_client(client_node *head, int fd) {
     client_node *cur;
     for (cur = head; 
             cur->next != NULL && cur->next->cl->fd != fd; 
-            head = head->next);
+            cur = cur->next);
 
     client_node *temp = cur->next;
     if (temp == NULL)
@@ -87,8 +73,32 @@ client_node *connect_client(client_node *head, int efd, int cfd) {
 client_node *disconnect_client(client_node *head, int efd, client *cl) {
     epoll_ctl(efd, EPOLL_CTL_DEL, cl->fd, NULL);
     printf("%s disconnected\n", cl->name);
+    char msg[40];
+    sprintf(msg, "%s left the chat :(\n", cl->name);
+    head = remove_client(head, cl->fd);
+    send_to_clients(&head, efd, msg, strlen(msg));
     num_cls--;
-    return remove_client(head, cl->fd);
+    return head;
+}
+
+int send_to_clients(client_node **head_addr, int efd, char *msg, int len) {
+    int count = 0;
+    for (client_node *node = *head_addr; node != NULL; node = node->next) {
+        send(node->cl->fd, msg, len, MSG_DONTWAIT);
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            *head_addr = disconnect_client(*head_addr, efd, node->cl);
+            count++;
+        }
+    }
+    return count;
+}
+
+int recv_from_client(client_node **head_addr, int efd, client *cl, char *dest, int len) {
+    if (fgets(dest, len, cl->f) == NULL || dest[strlen(dest) - 1] != '\n') {
+        *head_addr = disconnect_client(*head_addr, efd, cl);
+        return 1;
+    }
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -107,7 +117,8 @@ int main(int argc, char *argv[]) {
 
     int lfd = socket(AF_INET, SOCK_STREAM, 0);
 
-    if (bind(lfd, (struct sockaddr *) &addr, sizeof(struct sockaddr_in)) == -1) {
+    if (bind(lfd, (struct sockaddr *) &addr, 
+                sizeof(struct sockaddr_in)) == -1) {
         perror("bind");
         exit(1);
     }
@@ -138,7 +149,7 @@ int main(int argc, char *argv[]) {
     }
 
     struct epoll_event ready_evs[MAX_EVENTS];
-    char msgbuf[MAX_MSG_LEN + 1];
+    char recvbuf[MAX_MSG_LEN + 1];
     char sendbuf[MAX_MSG_LEN + MAX_NAME_LEN + 3];
     client_node *head = NULL;
     int num_cls = 0;
@@ -154,29 +165,24 @@ int main(int argc, char *argv[]) {
             }
 
             if (strlen(cl_info->name) == 0) {
-                if (fgets(msgbuf, MAX_NAME_LEN + 1, cl_info->f) == NULL || 
-                        msgbuf[strlen(msgbuf) - 1] != '\n') {
-                    head = disconnect_client(head, efd, cl_info);
+                if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_NAME_LEN + 1)) {
                     continue;
                 }
 
-                msgbuf[strlen(msgbuf) - 1] = '\0';
-                strcpy(cl_info->name, msgbuf);
-            }
-
-            if (fgets(msgbuf, MAX_MSG_LEN + 1, cl_info->f) == NULL || 
-                    msgbuf[strlen(msgbuf) - 1] != '\n') {
-                head = disconnect_client(head, efd, cl_info);
+                recvbuf[strlen(recvbuf) - 1] = '\0';
+                strcpy(cl_info->name, recvbuf);
+                sprintf(sendbuf, "%s joined the chat!\n", cl_info->name);
+                send_to_clients(&head, efd, sendbuf, strlen(sendbuf));
                 continue;
             }
 
-            sprintf(sendbuf, "%s: %s", cl_info->name, msgbuf);
-            for (client_node *node = head; node != NULL; node = node->next) {
-                send(node->cl->fd, sendbuf, strlen(sendbuf), MSG_DONTWAIT);
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    head = disconnect_client(head, efd, cl_info);
-                }
+            if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_MSG_LEN + 1)) {
+                continue;
             }
+
+            sprintf(sendbuf, "%s: %s", cl_info->name, recvbuf);
+
+            send_to_clients(&head, efd, sendbuf, strlen(sendbuf));
         }
     }
 }
