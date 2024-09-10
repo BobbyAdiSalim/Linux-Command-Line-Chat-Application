@@ -65,11 +65,12 @@ int main(int argc, char *argv[]) {
     memset(msgbuf, 0, BUF_LEN);
 
     printf("Ready\n");
-    // char name[31];
-    // fgets(name, 31, stdin);
 
     int pipe_rw[2];
+    int pipe_wr[2];
     pipe(pipe_rw);
+    pipe(pipe_wr);
+
     int pid = fork();
     if (pid == -1) {
         perror("fork");
@@ -79,6 +80,7 @@ int main(int argc, char *argv[]) {
     // child: message reader
     if (pid == 0) {
         close(pipe_rw[0]);
+        close(pipe_wr[1]);
         if (read(sfd, msgbuf, 1) != 1) {
             fprintf(stderr, "Bad server\n");
             perror("read");
@@ -97,8 +99,11 @@ int main(int argc, char *argv[]) {
         }
 
         FILE *reader = fdopen(sfd, "r");
+
+        read(pipe_wr[0], msgbuf, 1);
+        close(pipe_wr[0]);
+
         while (fgets(msgbuf, BUF_LEN, reader) != NULL) {
-            // TODO: handle case if message longer than 128?
             printf("%s", msgbuf);
         }
         if (feof(reader))
@@ -113,15 +118,18 @@ int main(int argc, char *argv[]) {
     setup_signal_handlers();
 
     close(pipe_rw[1]);
+    // close(pipe_wr[0]);
     read(pipe_rw[0], msgbuf, 1);
     close(pipe_rw[0]);
-    msgbuf[0] = 0;
 
+    msgbuf[0] = 0;
     while (strlen(msgbuf) < 2) {
         printf("Enter your name (1-15 characters long): ");
         fgets(msgbuf, MAX_NAME_LEN + 2, stdin);
     }
     write(sfd, msgbuf, strlen(msgbuf));
+    write(pipe_wr[1], msgbuf, 1);
+    close(pipe_wr[1]);
 
     while (!stop && fgets(msgbuf, BUF_LEN, stdin) != NULL) {
         clear_previous_line();

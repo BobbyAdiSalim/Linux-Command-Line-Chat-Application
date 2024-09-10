@@ -66,25 +66,24 @@ client_node *connect_client(client_node *head, int efd, int cfd) {
     epoll_ctl(efd, EPOLL_CTL_ADD, cfd, &ev);
     char msg = 1;
     send(cfd, &msg, sizeof(msg), MSG_DONTWAIT);
-    num_cls++;
+    printf("New client connected; client count = %d\n", ++num_cls);
     return add_client(head, cl);
 }
 
 client_node *disconnect_client(client_node *head, int efd, client *cl) {
     epoll_ctl(efd, EPOLL_CTL_DEL, cl->fd, NULL);
-    printf("%s disconnected\n", cl->name);
     char msg[40];
     sprintf(msg, "%s left the chat :(\n", cl->name);
+    printf("%s disconnected; client count = %d\n", cl->name, --num_cls);
     head = remove_client(head, cl->fd);
     send_to_clients(&head, efd, msg, strlen(msg));
-    num_cls--;
     return head;
 }
 
 int send_to_clients(client_node **head_addr, int efd, char *msg, int len) {
     int count = 0;
     for (client_node *node = *head_addr; node != NULL; node = node->next) {
-        send(node->cl->fd, msg, len, MSG_DONTWAIT);
+        if (node->cl->name[0] != '\0') send(node->cl->fd, msg, len, MSG_DONTWAIT);
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             *head_addr = disconnect_client(*head_addr, efd, node->cl);
             count++;
@@ -171,6 +170,7 @@ int main(int argc, char *argv[]) {
 
                 recvbuf[strlen(recvbuf) - 1] = '\0';
                 strcpy(cl_info->name, recvbuf);
+                printf("Hello %s!\n", cl_info->name);
                 sprintf(sendbuf, "%s joined the chat!\n", cl_info->name);
                 send_to_clients(&head, efd, sendbuf, strlen(sendbuf));
                 continue;
