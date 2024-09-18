@@ -62,4 +62,6 @@ void push_msg(msg_queue *queue, char *msg);
 
 void pop_msg(msg_queue *queue);
 
+void handle_msg(client_node **head_addr, int efd, client *cl, char *msg);
+
 #endif

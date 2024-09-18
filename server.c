@@ -134,6 +134,48 @@ void pop_msg(msg_queue *queue) {
     queue->count--;
 }
 
+void handle_msg(client_node **head_addr, int efd, client *cl, char *msg) {
+    char sendbuf[SENDBUF_LEN];
+    
+    // regular message
+    if (*msg != '/') {
+        sprintf(sendbuf, "%s: %s", cl->name, msg);
+        send_to_clients(head_addr, efd, sendbuf, strlen(sendbuf));
+        return;
+    }
+    char cmd[16];
+    char arg[16];
+    int idx;
+    sscanf(msg, "/%15s %15s %n", cmd, arg, &idx);
+    
+    // whisper
+    if (strcmp(cmd, "whisper") == 0) {
+        client_node *cur;
+        for (cur = *head_addr; cur != NULL && 
+                strcmp(cur->cl->name, arg); cur = cur->next);
+        
+        if (cur == NULL) {
+            send(cl->fd, "</Name not found/>\n", 19, MSG_DONTWAIT);
+            return;
+        }
+
+        sprintf(sendbuf, "%s whispers to you: %s", cl->name, &msg[idx]);
+        send(cur->cl->fd, sendbuf, strlen(sendbuf), MSG_DONTWAIT);
+        sprintf(sendbuf, "You whisper to %s: %s", cur->cl->name, &msg[idx]);
+        send(cl->fd, sendbuf, strlen(sendbuf), MSG_DONTWAIT);
+        return;
+    }
+
+    // quit
+    if (strcmp(cmd, "quit") == 0) {
+        *head_addr = disconnect_client(*head_addr, efd, cl);
+    }
+
+    // Invalid command
+    send(cl->fd, "</Invalid command/>\n", 20, MSG_DONTWAIT);
+    return;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Not enough arguments\n");
@@ -186,7 +228,7 @@ int main(int argc, char *argv[]) {
     char sendbuf[SENDBUF_LEN];
     client_node *head = NULL;
     int num_cls = 0;
-    
+
     while (1) {
         int num_evs = epoll_wait(efd, ready_evs, MAX_EVENTS, -1);
         for (int i = 0; i < num_evs; i++) {
@@ -219,10 +261,8 @@ int main(int argc, char *argv[]) {
             if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_MSG_LEN + 2)) {
                 continue;
             }
-
-            sprintf(sendbuf, "%s: %s", cl_info->name, recvbuf);
             
-            send_to_clients(&head, efd, sendbuf, strlen(sendbuf));
+            handle_msg(&head, efd, cl_info, recvbuf);
         }
     }
 }

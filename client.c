@@ -26,7 +26,7 @@ void handle_term(int signum) {
 }
 
 void setup_signal_handlers() {
-    int signals[] = {SIGTERM, SIGINT, SIGQUIT, SIGABRT, SIGILL, SIGSEGV, SIGFPE, SIGBUS, SIGTRAP, SIGCHLD};
+    int signals[] = {SIGTERM, SIGQUIT, SIGABRT, SIGILL, SIGSEGV, SIGFPE, SIGBUS, SIGTRAP, SIGCHLD};
     size_t num_signals = sizeof(signals) / sizeof(signals[0]);
 
     struct sigaction sa;
@@ -49,6 +49,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Not enough arguments\n");
         exit(1);
     }
+
+    signal(SIGINT, SIG_IGN);
 
     int sfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr;
@@ -78,7 +80,7 @@ int main(int argc, char *argv[]) {
     }
 
     // child: message reader
-    if (pid == 0) {
+    if (pid == 0) { 
         close(pipe_rw[0]);
         close(pipe_wr[1]);
         if (read(sfd, msgbuf, 1) != 1) {
