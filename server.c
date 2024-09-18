@@ -14,7 +14,7 @@
 
 int num_cls = 0;
 char name = 'a';
-FILE *chat_history;
+msg_queue msg_cache = { .head = NULL, .tail = NULL, .count = 0, .max = MAX_MSG_QUEUE };
 
 client_node *add_client(client_node *head, client *cl) {
     client_node *new_cl_node = malloc(sizeof(client_node));
@@ -82,8 +82,7 @@ client_node *disconnect_client(client_node *head, int efd, client *cl) {
 }
 
 int send_to_clients(client_node **head_addr, int efd, char *msg, int len) {
-    fseek(chat_history, 0, SEEK_END);
-    fprintf(chat_history, "%s", msg);
+    push_msg(&msg_cache, msg);
     int count = 0;
     for (client_node *node = *head_addr; node != NULL; node = node->next) {
         if (node->cl->name[0] != '\0') send(node->cl->fd, msg, len, MSG_DONTWAIT);
@@ -101,6 +100,38 @@ int recv_from_client(client_node **head_addr, int efd, client *cl, char *dest, i
         return 1;
     }
     return 0;
+}
+
+void push_msg(msg_queue *queue, char *msg) {
+    while (queue->count >= queue->max) {
+        pop_msg(queue);
+    }
+    msg_node *new_node = malloc(sizeof(msg_node));
+    strcpy(new_node->msg, msg);
+    new_node->prev = queue->head;
+    new_node->next = NULL;
+    if (queue->head != NULL) {
+        queue->head->next = new_node;
+    }
+    queue->head = new_node;
+    if (queue->count++ == 0) {
+        queue->tail = new_node;
+    }
+}
+
+void pop_msg(msg_queue *queue) {
+    if (queue == NULL || queue->tail == NULL) {
+        return;
+    }
+    msg_node *temp = queue->tail;
+    if (queue->tail->next != NULL) {
+        queue->tail->next->prev = NULL;
+    } else {
+        queue->head = NULL;
+    }
+    queue->tail = queue->tail->next;
+    free(temp);
+    queue->count--;
 }
 
 int main(int argc, char *argv[]) {
@@ -156,8 +187,6 @@ int main(int argc, char *argv[]) {
     client_node *head = NULL;
     int num_cls = 0;
     
-    chat_history = fopen("chat_history", "w+");
-
     while (1) {
         int num_evs = epoll_wait(efd, ready_evs, MAX_EVENTS, -1);
         for (int i = 0; i < num_evs; i++) {
@@ -177,9 +206,8 @@ int main(int argc, char *argv[]) {
                 strcpy(cl_info->name, recvbuf);
                 printf("Hello %s!\n", cl_info->name);
 
-                fseek(chat_history, 0, SEEK_SET);
-                while (fgets(sendbuf, SENDBUF_LEN, chat_history) != NULL) {
-                    send(cl_info->fd, sendbuf, strlen(sendbuf), MSG_DONTWAIT);
+                for (msg_node *cur = msg_cache.tail; cur != NULL; cur = cur->next) {
+                    send(cl_info->fd, cur->msg, strlen(cur->msg), MSG_DONTWAIT);
                 }
 
                 sprintf(sendbuf, "</%s joined the chat!/>\n", cl_info->name);
