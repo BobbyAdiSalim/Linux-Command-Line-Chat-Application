@@ -14,6 +14,7 @@
 
 int num_cls = 0;
 char name = 'a';
+FILE *chat_history;
 
 client_node *add_client(client_node *head, client *cl) {
     client_node *new_cl_node = malloc(sizeof(client_node));
@@ -73,7 +74,7 @@ client_node *connect_client(client_node *head, int efd, int cfd) {
 client_node *disconnect_client(client_node *head, int efd, client *cl) {
     epoll_ctl(efd, EPOLL_CTL_DEL, cl->fd, NULL);
     char msg[40];
-    sprintf(msg, "%s left the chat :(\n", cl->name);
+    sprintf(msg, "</%s left the chat :(/>\n", cl->name);
     printf("%s disconnected; client count = %d\n", cl->name, --num_cls);
     head = remove_client(head, cl->fd);
     send_to_clients(&head, efd, msg, strlen(msg));
@@ -81,6 +82,8 @@ client_node *disconnect_client(client_node *head, int efd, client *cl) {
 }
 
 int send_to_clients(client_node **head_addr, int efd, char *msg, int len) {
+    fseek(chat_history, 0, SEEK_END);
+    fprintf(chat_history, "%s", msg);
     int count = 0;
     for (client_node *node = *head_addr; node != NULL; node = node->next) {
         if (node->cl->name[0] != '\0') send(node->cl->fd, msg, len, MSG_DONTWAIT);
@@ -148,10 +151,12 @@ int main(int argc, char *argv[]) {
     }
 
     struct epoll_event ready_evs[MAX_EVENTS];
-    char recvbuf[MAX_MSG_LEN + 1];
-    char sendbuf[MAX_MSG_LEN + MAX_NAME_LEN + 3];
+    char recvbuf[RECVBUF_LEN];
+    char sendbuf[SENDBUF_LEN];
     client_node *head = NULL;
     int num_cls = 0;
+    
+    chat_history = fopen("chat_history", "w+");
 
     while (1) {
         int num_evs = epoll_wait(efd, ready_evs, MAX_EVENTS, -1);
@@ -164,24 +169,31 @@ int main(int argc, char *argv[]) {
             }
 
             if (strlen(cl_info->name) == 0) {
-                if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_NAME_LEN + 1)) {
+                if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_NAME_LEN + 2)) {
                     continue;
                 }
 
                 recvbuf[strlen(recvbuf) - 1] = '\0';
                 strcpy(cl_info->name, recvbuf);
                 printf("Hello %s!\n", cl_info->name);
-                sprintf(sendbuf, "%s joined the chat!\n", cl_info->name);
+
+                fseek(chat_history, 0, SEEK_SET);
+                while (fgets(sendbuf, SENDBUF_LEN, chat_history) != NULL) {
+                    send(cl_info->fd, sendbuf, strlen(sendbuf), MSG_DONTWAIT);
+                }
+
+                sprintf(sendbuf, "</%s joined the chat!/>\n", cl_info->name);
                 send_to_clients(&head, efd, sendbuf, strlen(sendbuf));
+
                 continue;
             }
 
-            if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_MSG_LEN + 1)) {
+            if (recv_from_client(&head, efd, cl_info, recvbuf, MAX_MSG_LEN + 2)) {
                 continue;
             }
 
             sprintf(sendbuf, "%s: %s", cl_info->name, recvbuf);
-
+            
             send_to_clients(&head, efd, sendbuf, strlen(sendbuf));
         }
     }

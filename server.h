@@ -1,7 +1,12 @@
+#ifndef _SERVER_H
+
+#define _SERVER_H
 #define MAX_NAME_LEN 15
 #define MAX_MSG_LEN 127
-#define MAX_EVENTS 16
+#define MAX_EVENTS 17
 #define MAX_CLIENTS 16
+#define RECVBUF_LEN MAX_MSG_LEN + 2
+#define SENDBUF_LEN MAX_NAME_LEN + MAX_MSG_LEN + 4
 
 typedef struct client {
     int fd;
@@ -25,3 +30,5 @@ client_node *disconnect_client(client_node *head, int efd, client *cl);
 int send_to_clients(client_node **head, int efd, char *msg, int len);
 
 int recv_from_client(client_node **head, int efd, client *cl, char *dest, int len);
+
+#endif
